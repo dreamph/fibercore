@@ -21,6 +21,8 @@ build
 .idea/libraries
 .idea/caches/
 .idea/vcs.xml
+.idea/handlex.iml
+.idea/modules.xml
 
 # Environment files
 #.env

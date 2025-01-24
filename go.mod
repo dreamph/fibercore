@@ -1,4 +1,4 @@
-module github.com/dreamph/fibercore
+module github.com/dreamph/handlex
 
 go 1.23
 

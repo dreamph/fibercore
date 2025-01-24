@@ -1,16 +1,56 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"github.com/dreamph/fibercore"
+	"github.com/dreamph/handlex"
 	"github.com/gofiber/fiber/v2"
 	errs "github.com/pkg/errors"
 	"io"
 	"log"
 	"mime/multipart"
-	"net/http"
 	"time"
 )
+
+type Fiber struct {
+	*fiber.Ctx
+}
+
+func (fcw *Fiber) Method() string {
+	return fcw.Ctx.Method()
+}
+
+func (fcw *Fiber) UserContext() context.Context {
+	return fcw.Ctx.UserContext()
+}
+
+func (fcw *Fiber) SendString(statusCode int, text string) error {
+	return fcw.Ctx.Status(statusCode).SendString(text)
+}
+
+func (fcw *Fiber) SendStream(stream io.Reader, size ...int) error {
+	return fcw.Ctx.SendStream(stream, size...)
+}
+
+func (fcw *Fiber) JSON(data interface{}) error {
+	return fcw.Ctx.JSON(data)
+}
+
+func (fcw *Fiber) BodyParser(out interface{}) error {
+	return fcw.Ctx.BodyParser(out)
+}
+
+func (fcw *Fiber) FormFile(key string) (*multipart.FileHeader, error) {
+	return fcw.Ctx.FormFile(key)
+}
+
+func (fcw *Fiber) Get(key string, defaultValue ...string) string {
+	return fcw.Ctx.Get(key, defaultValue...)
+}
+
+func (fcw *Fiber) Status(statusCode int) {
+	fcw.Ctx.Status(statusCode)
+}
 
 type RequestInfo struct {
 	Token string `json:"token"`
@@ -21,13 +61,13 @@ type RequestOption struct {
 	SuccessStatus  int
 }
 
-func EnableValidate(enable bool) fibercore.RequestOptions[RequestOption] {
+func EnableValidate(enable bool) handlex.RequestOptions[RequestOption] {
 	return func(opts *RequestOption) {
 		opts.EnableValidate = enable
 	}
 }
 
-func SuccessStatus(successStatus int) fibercore.RequestOptions[RequestOption] {
+func SuccessStatus(successStatus int) handlex.RequestOptions[RequestOption] {
 	return func(opts *RequestOption) {
 		opts.SuccessStatus = successStatus
 	}
@@ -71,11 +111,11 @@ func (e *AppError) Error() string {
 	return e.ErrCode + ":" + e.ErrMessage
 }
 
-func NewApiResponseHandler() fibercore.ApiResponseHandler[RequestOption] {
-	apiResponseHandler := fibercore.NewApiResponseHandler[RequestOption](&fibercore.ApiResponseHandlerOptions[RequestOption]{
-		ResponseSuccess: func(c *fiber.Ctx, requestOption *RequestOption, data any) error {
+func NewApiResponseHandler() handlex.ApiResponseHandler[handlex.Framework, RequestOption] {
+	apiResponseHandler := handlex.NewApiResponseHandler[handlex.Framework, RequestOption](&handlex.ApiResponseHandlerOptions[handlex.Framework, RequestOption]{
+		ResponseSuccess: func(c handlex.Framework, requestOption *RequestOption, data any) error {
 			if requestOption.SuccessStatus > 0 {
-				c = c.Status(requestOption.SuccessStatus)
+				c.Status(requestOption.SuccessStatus)
 			}
 
 			streamData, ok := data.(*StreamData)
@@ -86,9 +126,9 @@ func NewApiResponseHandler() fibercore.ApiResponseHandler[RequestOption] {
 					return c.SendStream(streamData.Data)
 				}
 			}
-			return c.Status(http.StatusOK).JSON(data)
+			return c.JSON(data)
 		},
-		ResponseError: func(c *fiber.Ctx, requestOption *RequestOption, err error) error {
+		ResponseError: func(c handlex.Framework, requestOption *RequestOption, err error) error {
 			res := &ErrorResponse{
 				Status:     false,
 				StatusCode: 500,
@@ -103,18 +143,18 @@ func NewApiResponseHandler() fibercore.ApiResponseHandler[RequestOption] {
 				res.Message = appError.ErrMessage
 				res.StatusCode = 400
 			}
-
-			return c.Status(res.StatusCode).JSON(res)
+			c.Status(res.StatusCode)
+			return c.JSON(res)
 		},
 	})
 	return apiResponseHandler
 }
 
-func NewNewApiHandler() fibercore.ApiHandler[RequestInfo, RequestOption] {
-	requestValidator := fibercore.NewRequestValidator()
-	//requestValidator.RegisterValidation("my_validation", MyFunc)
-	return fibercore.NewApiHandler[RequestInfo, RequestOption](NewApiResponseHandler(), &fibercore.ApiHandlerOptions[RequestInfo, RequestOption]{
-		OnValidate: func(c *fiber.Ctx, requestOption *RequestOption, data any) error {
+func NewNewApiHandler() handlex.ApiHandler[handlex.Framework, RequestInfo, RequestOption] {
+	requestValidator := handlex.NewRequestValidator()
+	responseHandler := NewApiResponseHandler()
+	return handlex.NewApiHandler[handlex.Framework, RequestInfo, RequestOption](responseHandler, &handlex.ApiHandlerOptions[handlex.Framework, RequestInfo, RequestOption]{
+		OnValidate: func(c handlex.Framework, requestOption *RequestOption, data any) error {
 			if requestOption.EnableValidate {
 				err := requestValidator.Validate(data)
 				if err != nil {
@@ -124,17 +164,20 @@ func NewNewApiHandler() fibercore.ApiHandler[RequestInfo, RequestOption] {
 			}
 			return nil
 		},
-		OnBefore: func(c *fiber.Ctx, requestOption *RequestOption) error {
+		OnBefore: func(c handlex.Framework, requestOption *RequestOption) error {
 			log.Println("OnBefore")
+			if requestOption.EnableValidate {
+				log.Println("EnableValidate")
+			}
 			return nil
 		},
-		GetRequestInfo: func(c *fiber.Ctx, requestOption *RequestOption) (*RequestInfo, error) {
+		GetRequestInfo: func(c handlex.Framework, requestOption *RequestOption) (*RequestInfo, error) {
 			log.Println("GetRequestInfo")
 			return &RequestInfo{
 				Token: "my-token",
 			}, nil
 		},
-		OnAfter: func(c *fiber.Ctx, requestOption *RequestOption) error {
+		OnAfter: func(c handlex.Framework, requestOption *RequestOption) error {
 			log.Println("OnAfter")
 			return nil
 		},
@@ -143,7 +186,7 @@ func NewNewApiHandler() fibercore.ApiHandler[RequestInfo, RequestOption] {
 
 type UploadRequest struct {
 	Name  string                `form:"name"`
-	File  *multipart.FileHeader `form:"file" validate:"allow-file-extensions=.go,allow-file-mime-types=text/plain:text/plain2"`
+	File1 *multipart.FileHeader `form:"file1"`
 	File2 *multipart.FileHeader `form:"file2"`
 }
 
@@ -155,29 +198,29 @@ func main() {
 	apiHandler := NewNewApiHandler()
 	app := fiber.New()
 	app.Get("/", func(c *fiber.Ctx) error {
-		return apiHandler.Do(c, nil, nil, func(ctx fibercore.Context[RequestInfo]) (interface{}, error) {
+		return apiHandler.Do(&Fiber{Ctx: c}, nil, nil, func(ctx *handlex.Context[RequestInfo]) (interface{}, error) {
 			return "Hi.", nil
 		})
 	})
 
 	app.Get("/custom-status", func(c *fiber.Ctx) error {
-		requestOptions := fibercore.WithRequestOptions(
+		requestOptions := handlex.WithRequestOptions(
 			SuccessStatus(201),
 		)
-		return apiHandler.Do(c, nil, requestOptions, func(ctx fibercore.Context[RequestInfo]) (interface{}, error) {
+		return apiHandler.Do(&Fiber{Ctx: c}, nil, requestOptions, func(ctx *handlex.Context[RequestInfo]) (interface{}, error) {
 			return "Hi.", nil
 		})
 	})
 
 	app.Get("/error", func(c *fiber.Ctx) error {
-		return apiHandler.Do(c, nil, nil, func(ctx fibercore.Context[RequestInfo]) (interface{}, error) {
+		return apiHandler.Do(&Fiber{Ctx: c}, nil, nil, func(ctx *handlex.Context[RequestInfo]) (interface{}, error) {
 			return nil, &AppError{ErrCode: "0001", ErrMessage: "Error"}
 		})
 	})
 
 	app.Post("/simple", func(c *fiber.Ctx) error {
 		request := &SimpleRequest{}
-		return apiHandler.Do(c, request, nil, func(ctx fibercore.Context[RequestInfo]) (interface{}, error) {
+		return apiHandler.Do(&Fiber{Ctx: c}, request, nil, func(ctx *handlex.Context[RequestInfo]) (interface{}, error) {
 			fmt.Println(request.Name)
 			return request.Name, nil
 		})
@@ -185,17 +228,13 @@ func main() {
 
 	app.Post("/upload", func(c *fiber.Ctx) error {
 		request := &UploadRequest{}
-		requestOptions := fibercore.WithRequestOptions(
+		requestOptions := handlex.WithRequestOptions(
 			EnableValidate(true),
 		)
-		return apiHandler.Do(c, request, requestOptions, func(ctx fibercore.Context[RequestInfo]) (interface{}, error) {
-			fmt.Println(request.Name)
-			if request.File != nil {
-				fmt.Println(request.File.Filename)
-			}
-			if request.File2 != nil {
-				fmt.Println(request.File2.Filename)
-			}
+		return apiHandler.Do(&Fiber{Ctx: c}, request, requestOptions, func(ctx *handlex.Context[RequestInfo]) (interface{}, error) {
+			fmt.Println("name:", request.Name)
+			fmt.Println("file1:", request.File1.Filename)
+			fmt.Println("file2:", request.File2.Filename)
 			return "Success", nil
 		})
 	})
@@ -205,5 +244,3 @@ func main() {
 		log.Fatal(err)
 	}
 }
-
-//curl -v -F name=cenery -F file=@api.go -F file2=@utils.go http://localhost:3000/upload

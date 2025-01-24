@@ -1,12 +1,26 @@
-package fibercore
+package handlex
 
 import (
-	"github.com/gofiber/fiber/v2"
 	"mime/multipart"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync"
+)
+
+const (
+	MIMETextXML        = "text/xml"
+	MIMETextHTML       = "text/html"
+	MIMETextPlain      = "text/plain"
+	MIMETextJavaScript = "text/javascript"
+
+	MIMEApplicationXML  = "application/xml"
+	MIMEApplicationJSON = "application/json"
+	MIMEApplicationForm = "application/x-www-form-urlencoded"
+	MIMEOctetStream     = "application/octet-stream"
+	MIMEMultipartForm   = "multipart/form-data"
+
+	HeaderContentType = "Content-Type"
 )
 
 var (
@@ -60,7 +74,7 @@ func cacheMultipartFieldCache(targetType reflect.Type) MultipartFieldCache {
 	return cache
 }
 
-func MultipartBodyParser(c *fiber.Ctx, targetPtr interface{}) error {
+func MultipartBodyParser[FrameworkContext Framework](c FrameworkContext, targetPtr interface{}) error {
 	v := reflect.ValueOf(targetPtr).Elem()
 	t := v.Type()
 
@@ -80,8 +94,12 @@ func MultipartBodyParser(c *fiber.Ctx, targetPtr interface{}) error {
 	return nil
 }
 
-func IsMultipartForm(c *fiber.Ctx) bool {
-	return strings.Contains(c.Get(fiber.HeaderContentType), fiber.MIMEMultipartForm)
+func IsMultipartForm[FrameworkContext Framework](c FrameworkContext) bool {
+	return strings.Contains(c.Get(HeaderContentType), MIMEMultipartForm)
+}
+
+func IsOctetStream[FrameworkContext Framework](c FrameworkContext) bool {
+	return strings.Contains(c.Get(HeaderContentType), MIMEOctetStream)
 }
 
 func GetFileMimeType(fileHeader *multipart.FileHeader) (string, error) {

@@ -1,4 +1,4 @@
-package fibercore
+package handlex
 
 import (
 	"github.com/go-playground/validator/v10"
